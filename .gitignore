@@ -31,3 +31,4 @@ icon*.xcf
 src/.deps/
 src/freedroid
 stamp-h1
+.vscode
