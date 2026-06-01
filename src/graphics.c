@@ -52,6 +52,11 @@ char *portrait_raw_mem[NUM_DROIDS];
 void PutPixel (SDL_Surface * surface, int x, int y, Uint32 pixel);
 static SDL_Surface *ScaleSurfaceNearest (SDL_Surface *src, float scale);
 static void ApplyWindowMetadata (void);
+static int ScaleCoord (int value);
+static int GetFullscreenLogicalWidth (int logical_height, int min_width);
+static void BlitSurfaceCoverRect (SDL_Surface *image, const SDL_Rect *target);
+static void BlitSurfaceScaledChecked (SDL_Surface *image, const SDL_Rect *src, const SDL_Rect *dst);
+static void ConfigureVideoLayout (void);
 int Load_Fonts (void);
 SDL_Surface *Load_Block (char *fpath, int line, int col, SDL_Rect * block, int flags);
 SDL_IOStream *load_raw_pic (const char *fpath, char **raw_mem );
@@ -416,13 +421,91 @@ DisplayImage(char *datafile)
   if (GameConfig.scale != 1.0)
     ScalePic (&image, GameConfig.scale);
 
-  SDL_BlitSurface(image, NULL, ne_screen, NULL);
+  BlitScreenBackground (image);
 
   SDL_DestroySurface(image);
 
   return;
 
 } // DisplayImage()
+
+static void
+BlitSurfaceCoverRect (SDL_Surface *image, const SDL_Rect *target)
+{
+  SDL_Rect dst;
+  double scale_x, scale_y, scale;
+
+  if ((image == NULL) || (image->w <= 0) || (image->h <= 0) ||
+      (target == NULL) || (target->w <= 0) || (target->h <= 0))
+    return;
+
+  scale_x = (double)target->w / (double)image->w;
+  scale_y = (double)target->h / (double)image->h;
+  scale = (scale_x > scale_y) ? scale_x : scale_y;
+
+  dst.w = (int)((double)image->w * scale + 0.5);
+  dst.h = (int)((double)image->h * scale + 0.5);
+  dst.x = target->x + (target->w - dst.w) / 2;
+  dst.y = target->y + (target->h - dst.h) / 2;
+
+  BlitSurfaceScaledChecked (image, NULL, &dst);
+}
+
+static void
+BlitSurfaceScaledChecked (SDL_Surface *image, const SDL_Rect *src, const SDL_Rect *dst)
+{
+  if (!SDL_BlitSurfaceScaled (image, src, ne_screen, dst, SDL_SCALEMODE_NEAREST))
+    DebugPrintf (0, "WARNING: scaled blit failed: %s\n", SDL_GetError ());
+}
+
+void
+BlitScreenBackground (SDL_Surface *image)
+{
+  BlitSurfaceCoverRect (image, &Screen_Rect);
+}
+
+void
+BlitBannerBackground (void)
+{
+  const int base_banner_w = 638;
+  const int base_logo_x = 244;
+  const int base_logo_w = 150;
+  SDL_Rect src_left, src_logo, src_right;
+  SDL_Rect dst_left, dst_logo, dst_right;
+  int logo_x, logo_w;
+
+  if ((banner_pic == NULL) || (banner_pic->w <= 0) || (banner_pic->h <= 0) ||
+      (Banner_Rect.w <= 0) || (Banner_Rect.h <= 0))
+    return;
+
+  logo_x = (banner_pic->w * base_logo_x) / base_banner_w;
+  logo_w = (banner_pic->w * base_logo_w) / base_banner_w;
+  if (logo_w < 1)
+    logo_w = 1;
+  if (logo_x < 0)
+    logo_x = 0;
+  if (logo_x + logo_w > banner_pic->w)
+    logo_w = banner_pic->w - logo_x;
+
+  Set_Rect (src_left, 0, 0, logo_x, banner_pic->h);
+  Set_Rect (src_logo, logo_x, 0, logo_w, banner_pic->h);
+  Set_Rect (src_right, logo_x + logo_w, 0,
+	    banner_pic->w - logo_x - logo_w, banner_pic->h);
+
+  Set_Rect (dst_logo, Banner_Rect.x + (Banner_Rect.w - logo_w) / 2,
+	    Banner_Rect.y, logo_w, Banner_Rect.h);
+  Set_Rect (dst_left, Banner_Rect.x, Banner_Rect.y,
+	    dst_logo.x - Banner_Rect.x, Banner_Rect.h);
+  Set_Rect (dst_right, dst_logo.x + dst_logo.w, Banner_Rect.y,
+	    Banner_Rect.x + Banner_Rect.w - (dst_logo.x + dst_logo.w),
+	    Banner_Rect.h);
+
+  if ((src_left.w > 0) && (dst_left.w > 0))
+    BlitSurfaceScaledChecked (banner_pic, &src_left, &dst_left);
+  BlitSurfaceScaledChecked (banner_pic, &src_logo, &dst_logo);
+  if ((src_right.w > 0) && (dst_right.w > 0))
+    BlitSurfaceScaledChecked (banner_pic, &src_right, &dst_right);
+}
 
 /*----------------------------------------------------------------------
  * This function resizes all blocks and structures involved in assembling
@@ -945,7 +1028,6 @@ void
 Init_Video (void)
 {
   char vid_driver[81];
-  Uint32 vid_flags;  		/* flags for SDL video mode */
 
   /* Initialize the SDL library */
   // if ( SDL_Init (SDL_INIT_VIDEO | SDL_INIT_TIMER) == -1 )
@@ -987,18 +1069,7 @@ Init_Video (void)
   DebugPrintf (0, "Video Driver Name: %s\n", vid_driver);
   DebugPrintf (0, "----------------------------------------------------------------------\n");
 
-
-  //  flags = SDL_HWSURFACE | SDL_DOUBLEBUF;
-  vid_flags = 0;
-  if (GameConfig.UseFullscreen) vid_flags |= SDL_FULLSCREEN;
-
-  if( !(ne_screen = FD_SetVideoMode ( Screen_Rect.w, Screen_Rect.h , 0 , vid_flags)) )
-    {
-      DebugPrintf (0, "ERORR: Couldn't set %d x %d video mode. SDL: %s\n",
-		   Screen_Rect.w, Screen_Rect.h, SDL_GetError());
-      exit(-1);
-    }
-  ApplyWindowMetadata ();
+  ResetVideoMode ();
   DebugPrintf(1, "Got video mode: ");
 
   GameConfig.Current_Gamma_Correction=1;
@@ -1290,6 +1361,92 @@ ApplyWindowMetadata (void)
 
   SDL_SetWindowIcon (window, img);
   SDL_DestroySurface (img);
+}
+
+static int
+ScaleCoord (int value)
+{
+  return (int)((float)value * GameConfig.scale);
+}
+
+static int
+GetFullscreenLogicalWidth (int logical_height, int min_width)
+{
+  SDL_DisplayID display;
+  const SDL_DisplayMode *mode;
+  int width;
+  SDL_Window *window = FD_GetWindow ();
+
+  if (window != NULL)
+    display = SDL_GetDisplayForWindow (window);
+  else
+    display = SDL_GetPrimaryDisplay ();
+
+  if (display == 0)
+    display = SDL_GetPrimaryDisplay ();
+
+  mode = SDL_GetDesktopDisplayMode (display);
+  if ((mode == NULL) || (mode->h <= 0))
+    return min_width;
+
+  width = (int)((double)logical_height * (double)mode->w / (double)mode->h + 0.5);
+  if (width < min_width)
+    width = min_width;
+
+  return width;
+}
+
+static void
+ConfigureVideoLayout (void)
+{
+  int base_width = ScaleCoord (640);
+  int base_height = ScaleCoord (480);
+  int banner_height = ScaleCoord (64);
+  int screen_width;
+
+  if (base_width < 1)
+    base_width = 1;
+  if (base_height < 1)
+    base_height = 1;
+  if (banner_height < 0)
+    banner_height = 0;
+
+  screen_width = base_width;
+  if (GameConfig.UseFullscreen && GameConfig.FullUserRect)
+    screen_width = GetFullscreenLogicalWidth (base_height, base_width);
+
+  Set_Rect (Screen_Rect, 0, 0, screen_width, base_height);
+  Set_Rect (Banner_Rect, 0, 0, screen_width, banner_height);
+  Set_Rect (Classic_User_Rect, ScaleCoord (32), ScaleCoord (150),
+	    ScaleCoord (9 * 64), ScaleCoord (4 * 64));
+  Set_Rect (Full_User_Rect, 0, Banner_Rect.h,
+	    Screen_Rect.w, Screen_Rect.h - Banner_Rect.h);
+
+  if (GameConfig.FullUserRect)
+    Copy_Rect (Full_User_Rect, User_Rect);
+  else
+    Copy_Rect (Classic_User_Rect, User_Rect);
+}
+
+void
+ResetVideoMode (void)
+{
+  Uint32 vid_flags = 0;
+
+  ConfigureVideoLayout ();
+
+  if (GameConfig.UseFullscreen)
+    vid_flags |= SDL_FULLSCREEN;
+
+  if( !(ne_screen = FD_SetVideoMode ( Screen_Rect.w, Screen_Rect.h, 0, vid_flags)) )
+    {
+      DebugPrintf (0, "ERORR: Couldn't set %d x %d video mode. SDL: %s\n",
+		   Screen_Rect.w, Screen_Rect.h, SDL_GetError());
+      Terminate (ERR);
+    }
+
+  ApplyWindowMetadata ();
+  BannerIsDestroyed = TRUE;
 }
 
 /*----------------------------------------------------------------------
@@ -1624,10 +1781,7 @@ void
 ScaleStatRects (float scale)
 {
   ScaleRect (Block_Rect, scale);
-  ScaleRect (User_Rect, scale);
-  ScaleRect (Classic_User_Rect, scale);
-  ScaleRect (Full_User_Rect, scale);
-  ScaleRect (Banner_Rect, scale);
+  ConfigureVideoLayout ();
   ScaleRect (Portrait_Rect, scale);
   ScaleRect (Cons_Droid_Rect, scale);
   ScaleRect (Menu_Rect, scale);
@@ -1694,24 +1848,10 @@ ScaleStatRects (float scale)
 void
 toggle_fullscreen (void)
 {
-  Uint32 vid_flags = 0;
   int want_fullscreen = !GameConfig.UseFullscreen;
 
-  if (want_fullscreen)
-    vid_flags |= SDL_FULLSCREEN;
-
-  if( !(ne_screen = FD_SetVideoMode ( Screen_Rect.w, Screen_Rect.h, 0, vid_flags)) )
-    {
-      DebugPrintf (0, "ERORR occured when trying ot toggle windowed/fullscreen %d x %d video mode.\n",
-		   Screen_Rect.w, Screen_Rect.h);
-      DebugPrintf (0, "SDL-Error: %s\n", SDL_GetError() );
-      Terminate (ERR);
-    }
-
-  ApplyWindowMetadata ();
-
   GameConfig.UseFullscreen = want_fullscreen;
-  BannerIsDestroyed = TRUE;
+  ResetVideoMode ();
 
   return;
 }

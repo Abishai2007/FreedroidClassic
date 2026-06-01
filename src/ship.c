@@ -473,7 +473,7 @@ PaintConsoleMenu (int pos, int flag)
     {
       ClearGraphMem ();
       SDL_SetSurfaceClipRect ( ne_screen , NULL );
-      SDL_BlitSurface( console_bg_pic1 , NULL , ne_screen , NULL );
+      BlitScreenBackground (console_bg_pic1);
 
       DisplayBanner (NULL, NULL,  BANNER_FORCE_UPDATE );
 
@@ -773,14 +773,14 @@ Sensors  1: %s\n\
   if (flags & UPDATE_ONLY)
     {
       SDL_SetSurfaceClipRect (ne_screen, &Cons_Text_Rect);
-      SDL_BlitSurface (console_bg_pic2, NULL, ne_screen, NULL);
+      BlitScreenBackground (console_bg_pic2);
       SDL_SetSurfaceClipRect (ne_screen, &Cons_Header_Rect);
-      SDL_BlitSurface (console_bg_pic2, NULL, ne_screen, NULL);
+      BlitScreenBackground (console_bg_pic2);
       SDL_SetSurfaceClipRect (ne_screen, NULL);
     }
   else // otherwise we just redraw the whole screen
     {
-      SDL_BlitSurface (console_bg_pic2, NULL, ne_screen, NULL);
+      BlitScreenBackground (console_bg_pic2);
       DisplayBanner (NULL, NULL,  BANNER_NO_SDL_UPDATE | BANNER_FORCE_UPDATE );
     }
 

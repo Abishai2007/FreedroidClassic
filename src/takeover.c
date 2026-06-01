@@ -180,7 +180,7 @@ Takeover (int enemynum)
     SDL_Delay(1);
   }
 
-  SDL_BlitSurface (takeover_bg_pic, NULL, ne_screen, NULL);
+  BlitScreenBackground (takeover_bg_pic);
   DisplayBanner (NULL, NULL,  BANNER_FORCE_UPDATE );
 
   wait_for_all_keys_released();

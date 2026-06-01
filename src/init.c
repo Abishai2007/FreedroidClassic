@@ -893,13 +893,6 @@ InitFreedroid (int argc, char *const argv[])
   // call this _after_ default settings and LoadGameConfig() ==> cmdline has highest priority!
   parse_command_line (argc, argv);
 
-  if (GameConfig.FullUserRect)
-    Copy_Rect(Full_User_Rect, User_Rect);
-  else
-    Copy_Rect(Classic_User_Rect, User_Rect);
-
-
-  ScaleRect (Screen_Rect, GameConfig.scale);   // make sure we open a window of the right (rescaled) size!
   Init_Video ();
 
   DisplayImage (find_file (TITLE_PIC_FILE, GRAPHICS_DIR, NO_THEME, CRITICAL)); // show title pic

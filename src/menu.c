@@ -49,6 +49,8 @@ extern char *cmd_strings[CMD_LAST];
 SDL_Surface *Menu_Background = NULL;
 int fheight;  // font height of Menu-font
 
+static void RestoreMenuBackground (void);
+
 // ----- Macros --------------------
 // ----- local types ----------
 typedef struct MenuEntry_s
@@ -57,6 +59,16 @@ typedef struct MenuEntry_s
   const char *(*handler)(MenuAction_t action);	/**< handler & info function for this menu entry (none if NULL) */
   const struct MenuEntry_s *submenu; 	/**< enter this submenu (if non-NULL) */
 } MenuEntry_t;
+
+static void
+RestoreMenuBackground (void)
+{
+  if (Menu_Background == NULL)
+    return;
+
+  if (!SDL_BlitSurface (Menu_Background, NULL, ne_screen, NULL))
+    DebugPrintf (0, "WARNING: failed to restore menu background: %s\n", SDL_GetError ());
+}
 
 
 // ----- local prototypes ----------
@@ -249,7 +261,7 @@ handle_StrictlyClassic ( MenuAction_t action )
 
       // set window type
       GameConfig.FullUserRect = FALSE;
-      Copy_Rect (Classic_User_Rect, User_Rect);
+      ResetVideoMode ();
       // set theme
       setTheme ( classic_theme_index );
       InitiateMenu (FALSE);
@@ -268,10 +280,7 @@ handle_WindowType ( MenuAction_t action )
   if ( (action == ACTION_CLICK) || (action == ACTION_LEFT) || (action == ACTION_RIGHT) )
     {
       flipToggle ( &GameConfig.FullUserRect );
-      if ( GameConfig.FullUserRect )
-        Copy_Rect ( Full_User_Rect, User_Rect );
-      else
-        Copy_Rect ( Classic_User_Rect, User_Rect );
+      ResetVideoMode ();
 
       InitiateMenu (FALSE);
     }
@@ -754,6 +763,14 @@ InitiateMenu (bool with_droids)
 
   if (Menu_Background) SDL_DestroySurface (Menu_Background);
   Menu_Background = SDL_ConvertSurface (ne_screen, ne_screen->format);  // keep a global copy of background
+  if (Menu_Background == NULL)
+    {
+      DebugPrintf (0, "ERROR: failed to cache menu background: %s\n", SDL_GetError ());
+      Terminate (ERR);
+    }
+  SDL_SetSurfaceBlendMode (Menu_Background, SDL_BLENDMODE_NONE);
+  SDL_SetSurfaceAlphaMod (Menu_Background, 255);
+  SDL_SetSurfaceRLE (Menu_Background, 0);
 
   SDL_HideCursor ();  // deactivate mouse-cursor in menus
   SetCurrentFont ( Menu_BFont );
@@ -895,7 +912,7 @@ ShowMenu ( const MenuEntry_t MenuEntries[] )
 
       if ( need_update )
         {
-          SDL_BlitSurface (Menu_Background, NULL, ne_screen, NULL);
+          RestoreMenuBackground ();
           // print menu
           int i;
           for ( i = 0; i < num_entries; i ++ )
@@ -1195,7 +1212,7 @@ Display_Key_Config (int selx, int sely)
   int posy = 0;
   int lheight = FontHeight (Font0_BFont) + 2;
 
-  SDL_BlitSurface (Menu_Background, NULL, ne_screen, NULL);
+  RestoreMenuBackground ();
 
   //      PutInfluence (startx - 1.1*Block_Rect.w, starty + (MenuPosition-1.5)*lheight);
   //PrintStringFont (ne_screen, (sely==1)? Font2_BFont:Font1_BFont, startx, starty+(posy++)*lheight, "Back");
