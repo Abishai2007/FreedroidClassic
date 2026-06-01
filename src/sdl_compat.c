@@ -9,22 +9,48 @@ static SDL_Surface *fd_window_surface = NULL;
 static SDL_Rect fd_present_dst = {0, 0, 0, 0};
 static int fd_logical_w = 0;
 static int fd_logical_h = 0;
+static int fd_window_surface_w = 0;
+static int fd_window_surface_h = 0;
+static int fd_pending_window_w = 0;
+static int fd_pending_window_h = 0;
+static bool fd_force_full_present = true;
 
 static bool FD_RefreshPresentationState(void);
 static void FD_UpdatePresentationRect(void);
 static void FD_MapLogicalRectToPhysical(const SDL_Rect *logical, SDL_Rect *physical);
+static bool FD_WindowIsFullscreen(void);
+static void FD_QueueWindowSize(int width, int height);
+static void FD_ClearPendingWindowSize(void);
+static bool FD_ApplyPendingWindowSize(void);
+static void FD_LogVideoModeError(const char *call, int width, int height, bool want_fullscreen, bool previous_fullscreen);
 static bool FD_Present(const SDL_Rect *rects, int numrects);
 
 static bool
 FD_RefreshPresentationState(void)
 {
+	SDL_Rect old_present_dst;
+	int old_surface_w, old_surface_h;
+
 	if (fd_window == NULL) {
 		return false;
 	}
 
+	if (!FD_ApplyPendingWindowSize()) {
+		return false;
+	}
+
+	old_surface_w = fd_window_surface_w;
+	old_surface_h = fd_window_surface_h;
+	old_present_dst = fd_present_dst;
+
 	fd_window_surface = SDL_GetWindowSurface(fd_window);
 	if (fd_window_surface == NULL) {
 		return false;
+	}
+	fd_window_surface_w = fd_window_surface->w;
+	fd_window_surface_h = fd_window_surface->h;
+	if (fd_window_surface_w != old_surface_w || fd_window_surface_h != old_surface_h) {
+		fd_force_full_present = true;
 	}
 
 	if (fd_logical_w <= 0 || fd_logical_h <= 0) {
@@ -48,9 +74,16 @@ FD_RefreshPresentationState(void)
 		}
 
 		fd_framebuffer = new_fb;
+		fd_force_full_present = true;
 	}
 
 	FD_UpdatePresentationRect();
+	if (fd_present_dst.x != old_present_dst.x ||
+	    fd_present_dst.y != old_present_dst.y ||
+	    fd_present_dst.w != old_present_dst.w ||
+	    fd_present_dst.h != old_present_dst.h) {
+		fd_force_full_present = true;
+	}
 	return true;
 }
 
@@ -132,6 +165,11 @@ FD_Present(const SDL_Rect *rects, int numrects)
 		return false;
 	}
 
+	if (fd_force_full_present) {
+		rects = NULL;
+		numrects = 0;
+	}
+
 	black = SDL_MapRGB(fd_window_surface->format, 0, 0, 0);
 	if (!SDL_FillSurfaceRect(fd_window_surface, NULL, black)) {
 		return false;
@@ -151,7 +189,11 @@ FD_Present(const SDL_Rect *rects, int numrects)
 	}
 
 	if (rects == NULL || numrects <= 0) {
-		return SDL_UpdateWindowSurface(fd_window);
+		ok = SDL_UpdateWindowSurface(fd_window);
+		if (ok) {
+			fd_force_full_present = false;
+		}
+		return ok;
 	}
 
 	mapped_rects = SDL_malloc((size_t)numrects * sizeof(*mapped_rects));
@@ -173,42 +215,129 @@ FD_Present(const SDL_Rect *rects, int numrects)
 	}
 
 	SDL_free(mapped_rects);
+	if (ok) {
+		fd_force_full_present = false;
+	}
 	return ok;
+}
+
+static bool
+FD_WindowIsFullscreen(void)
+{
+	return (fd_window != NULL) &&
+	       ((SDL_GetWindowFlags(fd_window) & SDL_WINDOW_FULLSCREEN) != 0);
+}
+
+static void
+FD_QueueWindowSize(int width, int height)
+{
+	fd_pending_window_w = width;
+	fd_pending_window_h = height;
+}
+
+static void
+FD_ClearPendingWindowSize(void)
+{
+	fd_pending_window_w = 0;
+	fd_pending_window_h = 0;
+}
+
+static bool
+FD_ApplyPendingWindowSize(void)
+{
+	if (fd_window == NULL || fd_pending_window_w <= 0 || fd_pending_window_h <= 0) {
+		return true;
+	}
+
+	if (FD_WindowIsFullscreen()) {
+		return true;
+	}
+
+	if (!SDL_SetWindowSize(fd_window, fd_pending_window_w, fd_pending_window_h)) {
+		return false;
+	}
+
+	fd_pending_window_w = 0;
+	fd_pending_window_h = 0;
+	SDL_PumpEvents();
+	return true;
+}
+
+static void
+FD_LogVideoModeError(const char *call, int width, int height, bool want_fullscreen, bool previous_fullscreen)
+{
+	const char *error = SDL_GetError();
+
+	if (error == NULL || error[0] == '\0') {
+		error = "<empty SDL error>";
+	}
+
+	SDL_Log("ERROR: FD_SetVideoMode failed in %s; requested=%dx%d target_fullscreen=%d previous_fullscreen=%d current_fullscreen=%d SDL: %s",
+	        call, width, height, want_fullscreen ? 1 : 0,
+	        previous_fullscreen ? 1 : 0, FD_WindowIsFullscreen() ? 1 : 0, error);
 }
 
 SDL_Surface *
 FD_SetVideoMode(int width, int height, int bpp, Uint32 flags)
 {
 	bool want_fullscreen = ((flags & SDL_FULLSCREEN) != 0);
+	bool was_fullscreen;
 
 	(void)bpp;
 
 	if (!fd_window) {
 		fd_window = SDL_CreateWindow("Freedroid", width, height, 0);
-		if (!fd_window)
+		if (!fd_window) {
+			FD_LogVideoModeError("SDL_CreateWindow", width, height, want_fullscreen, false);
 			return NULL;
+		}
 	}
 
 	fd_logical_w = width;
 	fd_logical_h = height;
+	fd_force_full_present = true;
+	was_fullscreen = FD_WindowIsFullscreen();
 
-	if (!SDL_SetWindowFullscreenMode(fd_window, NULL))
-		return NULL;
+	if (want_fullscreen) {
+		FD_ClearPendingWindowSize();
 
-	if (!want_fullscreen && !SDL_SetWindowSize(fd_window, width, height))
-		return NULL;
+		if (!SDL_SetWindowFullscreenMode(fd_window, NULL)) {
+			FD_LogVideoModeError("SDL_SetWindowFullscreenMode", width, height, want_fullscreen, was_fullscreen);
+			return NULL;
+		}
 
-	if (!SDL_SetWindowFullscreen(fd_window, want_fullscreen))
-		return NULL;
+		if (!SDL_SetWindowFullscreen(fd_window, true)) {
+			FD_LogVideoModeError("SDL_SetWindowFullscreen(true)", width, height, want_fullscreen, was_fullscreen);
+			return NULL;
+		}
 
-	if (!SDL_SyncWindow(fd_window))
-		return NULL;
+		SDL_PumpEvents();
+	} else {
+		FD_QueueWindowSize(width, height);
 
-	if (!FD_RefreshPresentationState())
-		return NULL;
+		if (was_fullscreen) {
+			if (!SDL_SetWindowFullscreen(fd_window, false)) {
+				FD_LogVideoModeError("SDL_SetWindowFullscreen(false)", width, height, want_fullscreen, was_fullscreen);
+				return NULL;
+			}
+			SDL_PumpEvents();
+		}
 
-	if (!FD_Present(NULL, 0))
+		if (!FD_ApplyPendingWindowSize()) {
+			FD_LogVideoModeError("SDL_SetWindowSize", width, height, want_fullscreen, was_fullscreen);
+			return NULL;
+		}
+	}
+
+	if (!FD_RefreshPresentationState()) {
+		FD_LogVideoModeError("FD_RefreshPresentationState", width, height, want_fullscreen, was_fullscreen);
 		return NULL;
+	}
+
+	if (!FD_Present(NULL, 0)) {
+		FD_LogVideoModeError("FD_Present", width, height, want_fullscreen, was_fullscreen);
+		return NULL;
+	}
 
 	return fd_framebuffer;
 }
@@ -237,6 +366,10 @@ FD_DestroyWindow(void)
 	fd_window_surface = NULL;
 	fd_logical_w = 0;
 	fd_logical_h = 0;
+	fd_window_surface_w = 0;
+	fd_window_surface_h = 0;
+	FD_ClearPendingWindowSize();
+	fd_force_full_present = true;
 	fd_present_dst.x = 0;
 	fd_present_dst.y = 0;
 	fd_present_dst.w = 0;

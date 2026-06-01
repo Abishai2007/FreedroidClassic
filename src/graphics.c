@@ -467,44 +467,37 @@ BlitScreenBackground (SDL_Surface *image)
 void
 BlitBannerBackground (void)
 {
-  const int base_banner_w = 638;
-  const int base_logo_x = 244;
-  const int base_logo_w = 150;
-  SDL_Rect src_left, src_logo, src_right;
-  SDL_Rect dst_left, dst_logo, dst_right;
-  int logo_x, logo_w;
+  SDL_Rect dst;
+  double scale_x, scale_y, scale;
+  Uint32 white;
 
-  if ((banner_pic == NULL) || (banner_pic->w <= 0) || (banner_pic->h <= 0) ||
-      (Banner_Rect.w <= 0) || (Banner_Rect.h <= 0))
+  if ((ne_screen == NULL) || (Banner_Rect.w <= 0) || (Banner_Rect.h <= 0))
     return;
 
-  logo_x = (banner_pic->w * base_logo_x) / base_banner_w;
-  logo_w = (banner_pic->w * base_logo_w) / base_banner_w;
-  if (logo_w < 1)
-    logo_w = 1;
-  if (logo_x < 0)
-    logo_x = 0;
-  if (logo_x + logo_w > banner_pic->w)
-    logo_w = banner_pic->w - logo_x;
+  white = SDL_MapRGB (ne_screen->format, 255, 255, 255);
+  if (!SDL_FillSurfaceRect (ne_screen, &Banner_Rect, white))
+    DebugPrintf (0, "WARNING: banner background fill failed: %s\n", SDL_GetError ());
 
-  Set_Rect (src_left, 0, 0, logo_x, banner_pic->h);
-  Set_Rect (src_logo, logo_x, 0, logo_w, banner_pic->h);
-  Set_Rect (src_right, logo_x + logo_w, 0,
-	    banner_pic->w - logo_x - logo_w, banner_pic->h);
+  if ((banner_pic == NULL) || (banner_pic->w <= 0) || (banner_pic->h <= 0))
+    return;
 
-  Set_Rect (dst_logo, Banner_Rect.x + (Banner_Rect.w - logo_w) / 2,
-	    Banner_Rect.y, logo_w, Banner_Rect.h);
-  Set_Rect (dst_left, Banner_Rect.x, Banner_Rect.y,
-	    dst_logo.x - Banner_Rect.x, Banner_Rect.h);
-  Set_Rect (dst_right, dst_logo.x + dst_logo.w, Banner_Rect.y,
-	    Banner_Rect.x + Banner_Rect.w - (dst_logo.x + dst_logo.w),
-	    Banner_Rect.h);
+  scale_x = (double)Banner_Rect.w / (double)banner_pic->w;
+  scale_y = (double)Banner_Rect.h / (double)banner_pic->h;
+  scale = (scale_x < scale_y) ? scale_x : scale_y;
+  if (scale > 1.0)
+    scale = 1.0;
 
-  if ((src_left.w > 0) && (dst_left.w > 0))
-    BlitSurfaceScaledChecked (banner_pic, &src_left, &dst_left);
-  BlitSurfaceScaledChecked (banner_pic, &src_logo, &dst_logo);
-  if ((src_right.w > 0) && (dst_right.w > 0))
-    BlitSurfaceScaledChecked (banner_pic, &src_right, &dst_right);
+  dst.w = (int)((double)banner_pic->w * scale + 0.5);
+  dst.h = (int)((double)banner_pic->h * scale + 0.5);
+  if (dst.w < 1)
+    dst.w = 1;
+  if (dst.h < 1)
+    dst.h = 1;
+
+  dst.x = Banner_Rect.x + (Banner_Rect.w - dst.w) / 2;
+  dst.y = Banner_Rect.y + (Banner_Rect.h - dst.h) / 2;
+
+  BlitSurfaceScaledChecked (banner_pic, NULL, &dst);
 }
 
 /*----------------------------------------------------------------------
