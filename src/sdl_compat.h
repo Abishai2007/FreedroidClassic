@@ -10,10 +10,15 @@ extern "C" {
 SDL_Surface *FD_SetVideoMode(int width, int height, int bpp, Uint32 flags);
 SDL_Window *FD_GetWindow(void);
 void FD_DestroyWindow(void);
+bool FD_UpdateWindowSurface(SDL_Window *window);
+bool FD_UpdateWindowSurfaceRects(SDL_Window *window, const SDL_Rect *rects, int numrects);
 
 #ifdef __cplusplus
 }
 #endif
+
+#define SDL_UpdateWindowSurface FD_UpdateWindowSurface
+#define SDL_UpdateWindowSurfaceRects FD_UpdateWindowSurfaceRects
 
 #ifndef SDL_FULLSCREEN
 #define SDL_FULLSCREEN 0x80000000u
