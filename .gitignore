@@ -34,3 +34,13 @@ src/.deps/
 src/freedroid
 stamp-h1
 .vscode
+
+# Emscripten build outputs and downloaded sources
+emscripten/build/
+emscripten/freedroid.html
+emscripten/freedroid.js
+emscripten/freedroid.wasm
+emscripten/freedroid.data
+emscripten/sdl3-src/
+emscripten/sdl3-image-src/
+emscripten/wasm-libs/
