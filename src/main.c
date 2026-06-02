@@ -33,6 +33,10 @@
 
 #include <SDL3/SDL_main.h>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 #include "system.h"
 
 #include "defs.h"
@@ -50,6 +54,139 @@ float LastRefreshSound = 2;
 extern bool show_cursor;
 void UpdateCountersForThisFrame (void);
 
+/* -----------------------------------------------------------------------
+ * Main-loop state machine
+ *
+ * Emscripten cannot block inside main() — the browser owns the event
+ * loop.  We therefore flatten the original two nested while-loops into
+ * a single callback (main_loop_iter) that is driven either by
+ * emscripten_set_main_loop() or by a plain while-loop on native builds.
+ * ----------------------------------------------------------------------- */
+typedef enum {
+  GS_INIT_MISSION,    /* (re)start: call InitNewMission, scale rects   */
+  GS_INTRO_WAIT_KEYS, /* drain any keys still held from previous play   */
+  GS_INTRO_PORTRAIT,  /* animate droid portrait for SHOW_WAIT ms        */
+  GS_PLAYING,         /* normal per-frame game tick                     */
+} GameLoopState;
+
+static GameLoopState loop_state   = GS_INIT_MISSION;
+static Uint32        intro_start_ticks = 0;
+
+static void
+main_loop_iter (void)
+{
+  /* QuitProgram is set by ReactToSpecialKeys / the SDL_EVENT_QUIT
+   * handler.  On Emscripten we must terminate from inside the
+   * callback; on native the while-loop condition catches it too. */
+  if (QuitProgram)
+    {
+      Terminate (0);
+      return;
+    }
+
+  switch (loop_state)
+    {
+    case GS_INIT_MISSION:
+      {
+        float scale;
+        InitNewMission (STANDARD_MISSION);
+
+        if ((scale = GameConfig.scale) != 1.0)
+          {
+            for (int levelnum = 0; levelnum < curShip.num_levels; levelnum++)
+              for (int i = 0; i < curShip.num_level_rects[levelnum]; i++)
+                ScaleRect (curShip.Level_Rects[levelnum][i], scale);
+            for (int i = 0; i < curShip.num_lift_rows; i++)
+              ScaleRect (curShip.LiftRow_Rect[i], scale);
+          }
+        loop_state = GS_INTRO_WAIT_KEYS;
+        break;
+      }
+
+    case GS_INTRO_WAIT_KEYS:
+      /* any_key_is_pressedR pumps the SDL event queue and soft-releases
+       * one held key per call, so we stay here until the slate is clear. */
+      if (any_key_is_pressedR ())
+        break;
+      ResetMouseWheel ();
+      show_droid_info (Me.type, -3, 0);
+      show_droid_portrait (Cons_Droid_Rect, Me.type, DROID_ROTATION_TIME, RESET);
+      intro_start_ticks = SDL_GetTicks ();
+      loop_state = GS_INTRO_PORTRAIT;
+      break;
+
+    case GS_INTRO_PORTRAIT:
+      update_input ();   /* pump events so FirePressedR reads fresh state */
+      show_droid_portrait (Cons_Droid_Rect, Me.type, DROID_ROTATION_TIME, 0);
+      if ((SDL_GetTicks () - intro_start_ticks >= SHOW_WAIT) || FirePressedR ())
+        {
+          ClearGraphMem ();
+          DisplayBanner (NULL, NULL, BANNER_FORCE_UPDATE | BANNER_NO_SDL_UPDATE);
+          SDL_UpdateWindowSurface (FD_GetWindow ());
+          GameOver = FALSE;
+          SDL_SetCursor (crosshair_cursor);
+          SDL_ShowCursor ();
+          loop_state = GS_PLAYING;
+        }
+      break;
+
+    case GS_PLAYING:
+      if (GameOver)
+        {
+          loop_state = GS_INIT_MISSION;
+          break;
+        }
+
+      StartTakingTimeForFPSCalculation ();
+      UpdateCountersForThisFrame ();
+      ReactToSpecialKeys ();
+
+      if (show_cursor) SDL_ShowCursor ();
+      else SDL_HideCursor ();
+
+      MoveLevelDoors ();
+      AnimateRefresh ();
+      ExplodeBlasts ();
+      AlertLevelWarning ();
+      DisplayBanner (NULL, NULL, 0);
+      MoveBullets ();
+      Assemble_Combat_Picture (DO_SCREEN_UPDATE);
+
+      for (int i = 0; i < MAXBULLETS; i++)
+        CheckBulletCollisions (i);
+
+      MoveInfluence ();
+      MoveEnemys ();
+      CheckInfluenceWallCollisions ();
+      CheckInfluenceEnemyCollision ();
+
+      if (!CurLevel->empty)
+        {
+          set_time_factor (1.0);
+        }
+      else
+        {
+          if (CurLevel->color == PD_DARK)
+            {
+              set_time_factor (GameConfig.emptyLevelSpeedup);
+            }
+          else if (CurLevel->timer <= 0)
+            {
+              CurLevel->color = PD_DARK;
+              Switch_Background_Music_To (BYCOLOR);
+            }
+        }
+
+      CheckIfMissionIsComplete ();
+
+      if (!GameConfig.HogCPU)
+        SDL_Delay (1);
+
+      ComputeFPSForThisFrame ();
+      break;
+    } /* switch loop_state */
+}
+
 /*-----------------------------------------------------------------
  * @Desc: the heart of the Game
  *
@@ -59,9 +196,6 @@ void UpdateCountersForThisFrame (void);
 int
 main (int argc, char * argv[])
 {
-  Uint32 now;
-  float scale;
-
   GameOver = FALSE;
   QuitProgram = FALSE;
 
@@ -72,7 +206,6 @@ main (int argc, char * argv[])
 
   init_keystr();
 
-  now = SDL_GetTicks();
   InitFreedroid (argc, argv);   // Initialisation of global variables and arrays
 
   SDL_HideCursor ();
@@ -82,110 +215,16 @@ main (int argc, char * argv[])
   Win32Disclaimer ();
 #endif
 
+#ifdef __EMSCRIPTEN__
+  /* Hand control to the browser; main_loop_iter is called each frame.
+   * simulate_infinite_loop=1 means this call never returns on the JS
+   * side, matching the original blocking-loop behaviour. */
+  emscripten_set_main_loop (main_loop_iter, 0, 1);
+#else
   while (!QuitProgram)
-    {
-      InitNewMission ( STANDARD_MISSION );
-
-      // scale Level-pic rects
-      if ( (scale = GameConfig.scale) != 1.0)
-	{
-	  for (int levelnum = 0; levelnum < curShip.num_levels; levelnum++)
-	    for (int i=0; i<curShip.num_level_rects[levelnum]; i++)
-	      ScaleRect (curShip.Level_Rects[levelnum][i], scale);
-	  for (int i=0; i < curShip.num_lift_rows; i++)
-	    ScaleRect (curShip.LiftRow_Rect[i], scale);
-	}
-
-
-      // release all keys
-      wait_for_all_keys_released();
-
-      show_droid_info (Me.type, -3, 0);  // show unit-intro page
-      show_droid_portrait (Cons_Droid_Rect, Me.type, DROID_ROTATION_TIME, RESET);
-      now=SDL_GetTicks();
-      while (  (SDL_GetTicks() - now < SHOW_WAIT) && (!FirePressedR())) {
-	show_droid_portrait (Cons_Droid_Rect, Me.type, DROID_ROTATION_TIME, 0);
-        SDL_Delay(1);
-      }
-
-      ClearGraphMem();
-      DisplayBanner (NULL, NULL, BANNER_FORCE_UPDATE |BANNER_NO_SDL_UPDATE);
-      SDL_UpdateWindowSurface(FD_GetWindow());
-
-      GameOver = FALSE;
-
-      SDL_SetCursor (crosshair_cursor); // default cursor is a crosshair
-      SDL_ShowCursor ();
-
-      while (!GameOver && !QuitProgram)
-	{
-	  StartTakingTimeForFPSCalculation();
-
-	  UpdateCountersForThisFrame ();
-
-	  ReactToSpecialKeys();
-
-	  if (show_cursor) SDL_ShowCursor();
-	  else SDL_HideCursor();
-
-	  MoveLevelDoors ();
-
-	  AnimateRefresh ();
-
-	  ExplodeBlasts ();	// move blasts to the right current "phase" of the blast
-
-	  AlertLevelWarning ();  // tout tout, blink blink... Alert!!
-
-	  DisplayBanner (NULL, NULL,  0 );
-
-	  MoveBullets ();   // leave this in front of graphics output: time_in_frames should start with 1
-
-	  Assemble_Combat_Picture ( DO_SCREEN_UPDATE );
-
-	  for (int i = 0; i < MAXBULLETS; i++) CheckBulletCollisions (i);
-
-	  MoveInfluence ();	// change Influ-speed depending on keys pressed, but
-	                        // also change his status and position and "phase" of rotation
-
-
-	  MoveEnemys ();	// move all the enemys:
-	                        // also do attacks on influ and also move "phase" or their rotation
-
-
-	  CheckInfluenceWallCollisions ();	/* Testen ob der Weg nicht durch Mauern verstellt ist */
-	  CheckInfluenceEnemyCollision ();
-
-          // control speed of time-flow: dark-levels=emptyLevelSpeedup, normal-levels=1.0
-          if ( ! CurLevel->empty )
-            {
-              set_time_factor ( 1.0 );
-            }
-          else
-            {
-              if ( CurLevel->color == PD_DARK )
-                {
-                  set_time_factor ( GameConfig.emptyLevelSpeedup );
-                } // if level is already dark
-              else if ( CurLevel->timer <= 0 ) // time to switch off the lights ...
-                {
-                  CurLevel->color = PD_DARK;
-                  Switch_Background_Music_To (BYCOLOR);  // start new background music
-                } // if wait timer hit 0
-            } // if level empty
-
-	  CheckIfMissionIsComplete ();
-
-	  if (!GameConfig.HogCPU)	// don't use up 100% CPU unless requested
-	    SDL_Delay (1);
-
-	  ComputeFPSForThisFrame();
-
-	} /* while !GameOver */
-
-    } /* while !QuitProgram */
-
-
+    main_loop_iter ();
   Terminate (0);
+#endif
   return (0);
 }				// void main(void)
 
