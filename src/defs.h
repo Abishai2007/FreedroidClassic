@@ -62,6 +62,39 @@
 #define NUM_ELEM(x) ( sizeof((x)) / sizeof((x)[0]) )
 
 // ----------------------------------------
+// Logging macros — prefer these over bare DebugPrintf() in new code.
+//
+// FD_ERROR / FD_WARN  always output (debug_level 0).
+// FD_INFO             outputs at debug_level >= 1  (-d flag).
+// FD_DEBUG            outputs at debug_level >= 2  (-d 2 flag).
+//
+// All macros prepend the calling function name and line number so
+// messages are always traceable without a debugger.
+//
+// FD_ASSERT(cond, fmt, ...)
+//   Logs the failed condition and triggers an SDL breakpoint when cond
+//   is false.  In release builds the SDL_assert is compiled out
+//   automatically by SDL when NDEBUG is defined; the log line remains.
+
+#define FD_ERROR(fmt, ...) \
+  DebugPrintf(0, "[ERR %s:%d] " fmt, __func__, __LINE__, ##__VA_ARGS__)
+#define FD_WARN(fmt, ...) \
+  DebugPrintf(0, "[WRN %s:%d] " fmt, __func__, __LINE__, ##__VA_ARGS__)
+#define FD_INFO(fmt, ...) \
+  DebugPrintf(1, "[INF %s:%d] " fmt, __func__, __LINE__, ##__VA_ARGS__)
+#define FD_DEBUG(fmt, ...) \
+  DebugPrintf(2, "[DBG %s:%d] " fmt, __func__, __LINE__, ##__VA_ARGS__)
+
+#define FD_ASSERT(cond, fmt, ...) \
+  do { \
+    if (!(cond)) { \
+      DebugPrintf(0, "[ASSERT FAILED] " #cond " in %s:%d -- " fmt "\n", \
+                  __func__, __LINE__, ##__VA_ARGS__); \
+      SDL_assert(cond); \
+    } \
+  } while (0)
+
+// ----------------------------------------
 // some input-related defines and macros
 
 #define FD_INPUT_BASE 0x100000
