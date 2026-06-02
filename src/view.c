@@ -686,7 +686,7 @@ DisplayBanner (const char* left, const char* right,  int flags )
   memset (right_box, ' ', RIGHT_TEXT_LEN);
 
   memcpy (left_box,  left, left_len * sizeof(left[0]));  /* this drops terminating \0 ! */
-  memcpy (right_box, right, left_len * sizeof(right[0]));  /* this drops terminating \0 ! */
+  memcpy (right_box, right, right_len * sizeof(right[0]));  /* this drops terminating \0 ! */
 
   left_box [LEFT_TEXT_LEN]  = '\0';     /* that's right, we want padding! */
   right_box[RIGHT_TEXT_LEN] = '\0';
