@@ -26,8 +26,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 EMCC    := emcc
-EMCMAKE := emcmake cmake
-EMMAKE  := emmake make
+EMCMAKE := emcmake
+EMMAKE  := emmake
 
 SDL3_BRANCH     ?= release-3.2.x
 SDL3_IMG_BRANCH ?= release-3.2.x
@@ -124,6 +124,7 @@ $(WASM_LIBS)/lib/libSDL3.a: | _check-emcc
 			-DCMAKE_INSTALL_PREFIX=$(WASM_LIBS) \
 			-DSDL_SHARED=OFF \
 			-DSDL_STATIC=ON \
+			-DSDL_INSTALL=ON \
 			-DSDL_AUDIO=ON \
 			-DSDL_VIDEO=ON \
 			-DSDL_RENDER=OFF && \
@@ -142,6 +143,7 @@ $(WASM_LIBS)/lib/libSDL3_image.a: $(WASM_LIBS)/lib/libSDL3.a
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_INSTALL_PREFIX=$(WASM_LIBS) \
 			-DCMAKE_PREFIX_PATH=$(WASM_LIBS) \
+			-DSDL3_DIR=$(WASM_LIBS)/lib/cmake/SDL3 \
 			-DSDLIMAGE_AVIF=OFF \
 			-DSDLIMAGE_WEBP=OFF \
 			-DSDLIMAGE_JXL=OFF \
