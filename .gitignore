@@ -20,10 +20,12 @@
 /title-1024x500.png
 /title-1024x500.xcf
 Makefile
+!emscripten/Makefile
 Screenshot_*.png
 Screenshot_*.xcf
 TAGS
 config.h
+!emscripten/config.h
 config.log
 config.status
 icon*.png

@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FreedroidClassic</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a0a0a;
+      color: #ccc;
+      font-family: monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      gap: 12px;
+    }
+
+    #loading {
+      text-align: center;
+    }
+    #loading h2 { font-size: 1rem; color: #888; margin-bottom: 12px; }
+
+    #progress-wrap {
+      width: 320px;
+      height: 14px;
+      background: #222;
+      border: 1px solid #444;
+      border-radius: 2px;
+      overflow: hidden;
+      margin: 0 auto 8px;
+    }
+    #progress-fill {
+      height: 100%;
+      width: 0%;
+      background: #c0392b;
+      transition: width 0.15s ease;
+    }
+    #status { font-size: 11px; color: #555; }
+
+    #game-wrap { display: none; text-align: center; }
+
+    canvas {
+      display: block;
+      border: 1px solid #333;
+      /* keep pixels sharp when CSS-scaled */
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+
+    .controls {
+      margin-top: 6px;
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+    }
+    button {
+      background: #1e1e1e;
+      color: #aaa;
+      border: 1px solid #444;
+      padding: 4px 14px;
+      cursor: pointer;
+      font-family: monospace;
+      font-size: 12px;
+      border-radius: 2px;
+    }
+    button:hover { background: #2a2a2a; color: #fff; }
+  </style>
+</head>
+<body>
+
+  <div id="loading">
+    <h2>Loading FreedroidClassic&hellip;</h2>
+    <div id="progress-wrap"><div id="progress-fill"></div></div>
+    <p id="status">Initializing&hellip;</p>
+  </div>
+
+  <div id="game-wrap">
+    <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+    <div class="controls">
+      <button id="btn-fullscreen">Fullscreen</button>
+      <button id="btn-mute" style="display:none">Mute</button>
+    </div>
+  </div>
+
+  <script>
+    var statusEl   = document.getElementById('status');
+    var fillEl     = document.getElementById('progress-fill');
+    var loadingEl  = document.getElementById('loading');
+    var gameWrapEl = document.getElementById('game-wrap');
+
+    function showGame() {
+      loadingEl.style.display = 'none';
+      gameWrapEl.style.display = 'block';
+    }
+
+    document.getElementById('btn-fullscreen').addEventListener('click', function () {
+      Module.requestFullscreen(false, false);
+    });
+
+    var Module = {
+      canvas: document.getElementById('canvas'),
+
+      setStatus: function (text) {
+        if (!text) { showGame(); return; }
+        var m = text.match(/([^(]+)\((\d+)\/(\d+)\)/);
+        if (m) {
+          fillEl.style.width = (parseInt(m[2]) / parseInt(m[3]) * 100) + '%';
+        }
+        statusEl.textContent = text;
+      },
+
+      onRuntimeInitialized: function () { showGame(); },
+
+      print:    function (t) { console.log(t); },
+      printErr: function (t) { console.warn(t); },
+
+      /* Suppress the default Emscripten fullscreen logic so our button
+       * stays in sync.  SDL3 calls Module.requestFullscreen() directly. */
+      requestFullscreen: function (lockPointer, resizeCanvas) {
+        var c = Module.canvas;
+        var req = c.requestFullscreen || c.webkitRequestFullscreen;
+        if (req) req.call(c);
+      }
+    };
+
+    window.addEventListener('error', function (e) {
+      statusEl.textContent = 'Error: ' + e.message;
+    });
+  </script>
+
+  {{{ SCRIPT }}}
+
+</body>
+</html>
